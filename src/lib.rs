@@ -14,11 +14,15 @@ fn print_link_args(dst: &Path, project_name: &str) {
 
     println!("cargo:rustc-link-search=native={}/build", dst.display());
 
+    let mut search_paths = Vec::new();
+
     for token in contents.split_whitespace() {
         let path = Path::new(&token.replace('\\', "/")).to_owned();
         if let Some(parent) = path.parent() {
-            if !parent.to_string_lossy().is_empty() {
-                println!("cargo:rustc-link-search=native={}", parent.display());
+            let search_path = parent.to_string_lossy().to_string();
+            if !search_path.is_empty() && !search_paths.contains(&search_path) {
+                println!("cargo:rustc-link-search=native={}", &search_path);
+                search_paths.push(search_path);
             }
         }
         println!(
@@ -35,11 +39,15 @@ fn print_link_args(dst: &Path, project_name: &str) {
 
     println!("cargo:rustc-link-search=native={}/build", dst.display());
 
+    let mut search_paths = Vec::new();
+
     for token in contents.split_whitespace() {
         let path = Path::new(&token.replace('\\', "/")).to_owned();
         if let Some(parent) = path.parent() {
-            if !parent.to_string_lossy().is_empty() {
-                println!("cargo:rustc-link-search=native={}", parent.display());
+            let search_path = parent.to_string_lossy().to_string();
+            if !search_path.is_empty() && !search_paths.contains(&search_path) {
+                println!("cargo:rustc-link-search=native={}", &search_path);
+                search_paths.push(search_path);
             }
         }
 
@@ -65,6 +73,9 @@ fn print_link_args(dst: &Path, project_name: &str) {
 
         println!("cargo:rustc-link-lib={lib}");
     }
+
+    // also link libstdc++
+    println!("cargo:rustc-link-lib=stdc++");
 }
 
 fn read_link_line(dst: &Path, project_name: &str) -> String {
