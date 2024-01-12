@@ -82,34 +82,15 @@ fn read_link_line(dst: &Path, project_name: &str) -> String {
         .unwrap_or_else(|| panic!("could not find echo target in {}", build_ninja));
     let contents = &contents[index..];
 
-    // now find the end of the target block
-    let end = contents
-        .find("\n\n")
-        .or_else(|| contents.find("\r\n\r\n"))
-        .unwrap_or_else(|| panic!("could not find end of target block in {}", build_ninja));
+    // link args are contained between | and ||
+    let index = contents.find("| ")
+        .unwrap_or_else(|| panic!("could not find beginning of linker args in {}", build_ninja));
 
-    let contents = &contents[..end];
+    let contents = &contents[index+2..];
 
-    // now find the LINK_LIBRARIES line
-    let link_libraries = "LINK_LIBRARIES = ";
-    let index = contents.find(link_libraries).unwrap_or_else(|| {
-        panic!(
-            "could not find LINK_LIBRARIES = in {}:\n{}",
-            build_ninja, contents
-        )
-    });
-    let contents = &contents[index+link_libraries.len()..];
-    let end = contents
-        .find("\r\n")
-        .or_else(|| contents.find("\n"))
-        .unwrap_or_else(|| {
-            panic!(
-                "could not find end of link libraries line in {}:\n{}",
-                build_ninja, contents
-            )
-        });
-
-    let contents = &contents[..end];
+    let end = contents.find("||").unwrap_or_else(||panic!("could not find end of linker args in {}", build_ninja));
+    // on windows drive letters are encoded as C$:\
+    let contents = contents[..end].replace("$:", ":");
 
     contents.to_string()
 }
