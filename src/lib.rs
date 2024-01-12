@@ -171,6 +171,8 @@ impl Config {
         let build = dst.join("build");
         let _ = fs::create_dir_all(&build);
 
+        self.maybe_clear(&build);
+
         let build_type = if let Some(build_type) = &self.build_type {
             build_type.clone()
         } else {
@@ -205,6 +207,55 @@ impl Config {
         print_link_args(&dst, &self.project_name);
 
         dst
+    }
+
+    // If a cmake project has previously been built (e.g. CMakeCache.txt already
+    // exists), then cmake will choke if the source directory for the original
+    // project being built has changed. Detect this situation through the
+    // `CMAKE_HOME_DIRECTORY` variable that cmake emits and if it doesn't match
+    // we blow away the build directory and start from scratch (the recommended
+    // solution apparently [1]).
+    //
+    // [1]: https://cmake.org/pipermail/cmake/2012-August/051545.html
+    //
+    // This is take from: https://github.com/rust-lang/cmake-rs
+    // Licensed under Apache-2.0
+    fn maybe_clear(&self, dir: &Path) {
+        use std::io::Read;
+        // CMake will apparently store canonicalized paths which normally
+        // isn't relevant to us but we canonicalize it here to ensure
+        // we're both checking the same thing.
+        let path = fs::canonicalize(&self.project_path).unwrap_or_else(|_| self.project_path.clone());
+        let mut f = match std::fs::File::open(dir.join("CMakeCache.txt")) {
+            Ok(f) => f,
+            Err(..) => return,
+        };
+        let mut u8contents = Vec::new();
+        match f.read_to_end(&mut u8contents) {
+            Ok(f) => f,
+            Err(..) => return,
+        };
+        let contents = String::from_utf8_lossy(&u8contents);
+        drop(f);
+        for line in contents.lines() {
+            if line.starts_with("CMAKE_HOME_DIRECTORY") {
+                let needs_cleanup = match line.split('=').next_back() {
+                    Some(cmake_home) => fs::canonicalize(cmake_home)
+                        .ok()
+                        .map(|cmake_home| cmake_home != path)
+                        .unwrap_or(true),
+                    None => true,
+                };
+                if needs_cleanup {
+                    println!(
+                        "detected home dir change, cleaning out entire build \
+                         directory"
+                    );
+                    fs::remove_dir_all(dir).unwrap();
+                }
+                break;
+            }
+        }
     }
 }
 
