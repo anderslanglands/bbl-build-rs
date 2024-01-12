@@ -1,15 +1,16 @@
-use std::{path::{Path, PathBuf}, ffi::OsStr};
+use std::{
+    ffi::{OsStr, OsString},
+    fs,
+    path::{Path, PathBuf},
+};
 
 #[cfg(target_os = "linux")]
 use regex::Regex;
 
 #[cfg(target_os = "windows")]
 fn print_link_args(dst: &Path, project_name: &str) {
-    // get linker args from LinkLine.txt cmake output
-    // TODO: wrap this all up in a crate
-    let linkline_fn = format!("{}/build/{project_name}-link-libraries.txt", dst.display());
-    let contents = std::fs::read_to_string(&linkline_fn)
-        .unwrap_or_else(|e| panic!("could not read {linkline_fn}: {e}"));
+    // get linker args from build.ninja
+    let contents = read_link_line(dst, project_name);
 
     println!("cargo:rustc-link-search=native={}/build", dst.display());
 
@@ -29,11 +30,8 @@ fn print_link_args(dst: &Path, project_name: &str) {
 
 #[cfg(target_os = "linux")]
 fn print_link_args(dst: &Path, project_name: &str) {
-    // get linker args from LinkLine.txt cmake output
-    // TODO: wrap this all up in a crate
-    let linkline_fn = format!("{}/build/{project_name}-link-libraries.txt", dst.display());
-    let contents = std::fs::read_to_string(&linkline_fn)
-        .unwrap_or_else(|e| panic!("could not read {linkline_fn}: {e}"));
+    // get linker args from build.ninja
+    let contents = read_link_line(dst, project_name);
 
     println!("cargo:rustc-link-search=native={}/build", dst.display());
 
@@ -69,40 +67,174 @@ fn print_link_args(dst: &Path, project_name: &str) {
     }
 }
 
+fn read_link_line(dst: &Path, project_name: &str) -> String {
+    let build_ninja = format!("{}/build/build.ninja", dst.display());
+    let contents = std::fs::read_to_string(&build_ninja)
+        .unwrap_or_else(|e| panic!("could not read {build_ninja}: {e}"));
+
+    // now parse the build.ninja to find the link line in there
+    // this could very well be the world's worst parser
+    let index = contents
+        .find(&format!(
+            "build {}-link-libraries.txt: ECHO_EXECUTABLE_LINKER",
+            project_name
+        ))
+        .unwrap_or_else(|| panic!("could not find echo target in {}", build_ninja));
+    let contents = &contents[index..];
+
+    // now find the end of the target block
+    let end = contents
+        .find("\n\n")
+        .or_else(|| contents.find("\r\n\r\n"))
+        .unwrap_or_else(|| panic!("could not find end of target block in {}", build_ninja));
+
+    let contents = &contents[..end];
+
+    // now find the LINK_LIBRARIES line
+    let link_libraries = "LINK_LIBRARIES = ";
+    let index = contents.find(link_libraries).unwrap_or_else(|| {
+        panic!(
+            "could not find LINK_LIBRARIES = in {}:\n{}",
+            build_ninja, contents
+        )
+    });
+    let contents = &contents[index+link_libraries.len()..];
+    let end = contents
+        .find("\r\n")
+        .or_else(|| contents.find("\n"))
+        .unwrap_or_else(|| {
+            panic!(
+                "could not find end of link libraries line in {}:\n{}",
+                build_ninja, contents
+            )
+        });
+
+    let contents = &contents[..end];
+
+    contents.to_string()
+}
+
 pub struct Config {
     project_name: String,
-    cmake_config: cmake::Config
+    project_path: PathBuf,
+    defines: Vec<(OsString, OsString)>,
+    build_type: Option<String>,
 }
 
 impl Config {
     pub fn new<P: AsRef<Path>>(project_name: &str, path: P) -> Config {
         Config {
             project_name: project_name.to_string(),
-            cmake_config: cmake::Config::new(path)
+            project_path: path.as_ref().to_owned(),
+            defines: Vec::new(),
+            build_type: None,
         }
     }
 
-    pub fn generator<S: AsRef<OsStr>>(&mut self, generator: S) -> &mut Config {
-        self.cmake_config.generator(generator);
-        self
-    }
-
     pub fn define<K: AsRef<OsStr>, V: AsRef<OsStr>>(&mut self, key: K, value: V) -> &mut Config {
-        self.cmake_config.define(key, value);
+        self.defines
+            .push((key.as_ref().to_os_string(), value.as_ref().to_os_string()));
         self
     }
 
-    pub fn profile(&mut self, profile: &str) -> &mut Config {
-        self.cmake_config.profile(profile);
+    pub fn build_type(&mut self, build_type: &str) -> &mut Config {
+        self.build_type = Some(build_type.to_string());
         self
     }
 
+    // /// Configure an environment variable for the `cmake` processes spawned by
+    // /// this crate in the `build` step.
+    // pub fn env<K, V>(&mut self, key: K, value: V) -> &mut Config
+    // where
+    //     K: AsRef<OsStr>,
+    //     V: AsRef<OsStr>,
+    // {
+    //     self.cmake_config.env(key, value);
+    //     self
+    // }
 
     pub fn build(&mut self) -> PathBuf {
-        let dst = self.cmake_config.build();
+        let out_dir = match std::env::var("OUT_DIR") {
+            Ok(out_dir) => out_dir,
+            // if we don't have OUT_DIR, i.e. we're not running in a build.rs
+            // (but probably from a test environment), make a build dir in
+            // target
+            Err(_) => std::env::current_dir()
+                .unwrap()
+                .join("target")
+                .join(&self.project_name)
+                .to_string_lossy()
+                .to_string(),
+        };
+
+        let dst = PathBuf::from(out_dir);
+        let build = dst.join("build");
+        let _ = fs::create_dir_all(&build);
+
+        let build_type = if let Some(build_type) = &self.build_type {
+            build_type.clone()
+        } else {
+            "Release".to_string()
+        };
+
+        let mut cmd = std::process::Command::new("cmake");
+        cmd.args(["-G", "Ninja"]);
+        cmd.arg(format!("-DCMAKE_BUILD_TYPE={}", build_type));
+        cmd.arg(format!("-S {}", self.project_path.display()));
+        cmd.arg(format!("-B {}", build.display()));
+        cmd.arg(format!("-DCMAKE_INSTALL_PREFIX={}", dst.display()));
+
+        for (key, value) in &self.defines {
+            cmd.arg(format!(
+                "-D{}={}",
+                key.to_str().unwrap(),
+                value.to_str().unwrap()
+            ));
+        }
+
+        // configure
+        run(&mut cmd);
+
+        // build
+        let mut cmd = std::process::Command::new("cmake");
+        cmd.args(["--build", &format!("{}", build.display())]);
+        cmd.args(["--target", "install"]);
+
+        run(&mut cmd);
 
         print_link_args(&dst, &self.project_name);
 
         dst
+    }
+}
+
+fn run(cmd: &mut std::process::Command) {
+    println!("running {:?}", cmd);
+    let status = match cmd.status() {
+        Ok(status) => status,
+        Err(ref e) if e.kind() == std::io::ErrorKind::NotFound => {
+            panic!(
+                "failed to execute command: {}\nis `cmake` not installed or not in the path?",
+                e,
+            );
+        }
+        Err(e) => panic!("failed to execute command: {}", e),
+    };
+    if !status.success() {
+        panic!("command did not execute successfully, got: {}", status);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::*;
+
+    #[test]
+    pub fn test01() {
+        let dst = Config::new("openusd", "../bbl-usd")
+            .define("BBL_LANGUAGES", "rust")
+            .build();
+
+        println!("{}", dst.display());
     }
 }
