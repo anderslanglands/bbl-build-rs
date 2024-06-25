@@ -1,12 +1,15 @@
-# `bbl-build` -- Babble Build
+# `bbl-build` — [`babble`](https://github.com/anderslanglands/babble) Build
 
-A companion crate to build `babble`-wrapped C++ depdencies as part of a Rust project.
+A companion crate to build `babble`-wrapped C++ dependencies as part of a Rust
+project.
 
 ## Project Setup With Babble-Wrapped C++ Lib
 
 We are going to wrap a lib called `foo`.
 
-Refer to the [`babble` documentation](https://github.com/anderslanglands/babble/blob/main/README.md) on how to set up the `bbl-foo` folder.
+Refer to the
+[`babble` documentation](https://github.com/anderslanglands/babble/blob/main/README.md)
+on how to set up the `bbl-foo` folder.
 
 ```
 bbl-foo
@@ -28,7 +31,8 @@ Add this to your `Cargo.toml`:
 bbl-build = { git = "https://github.com/anderslanglands/bbl-build-rs.git" }
 ```
 
-Still assuming you are wrapping a lib called `foo`, call this somwhere in your `build.rs`:
+Still assuming you are wrapping a lib called `foo`, call this somewhere in your
+`build.rs`:
 
 ```rust
 let _dst = Config::new("foo", "bbl-foo")
@@ -38,7 +42,9 @@ let _dst = Config::new("foo", "bbl-foo")
 println!("cargo:rerun-if-changed=bbl-foo");
 ```
 
-If you have a different project layout make sure you adjust the location of the `bbl-foo` folder in bot the call to `Config::new()` and the `println!()` invocation.
+If you have a different project layout make sure you adjust the location of the
+`bbl-foo` folder in bot the call to `Config::new()` and the `println!()`
+invocation.
 
 Bindings will be generated in `$OUT_DIR/build/foo.rs`.
 
@@ -50,7 +56,8 @@ include!(concat!(env!("OUT_DIR"), "/build/foo.rs"));
 
 ## Pitfalls
 
-Make sure `BBL_PLUGIN_PATH` is set to where the Rust plugin for `babble` can be found.
+Make sure `BBL_PLUGIN_PATH` is set to where the Rust plugin for `babble` can be
+found.
 
 On a Linux system a typical location would be `/usr/local/plugins/libbbl-rust`.
 
