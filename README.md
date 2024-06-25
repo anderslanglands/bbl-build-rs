@@ -31,19 +31,18 @@ Add this to your `Cargo.toml`:
 bbl-build = { git = "https://github.com/anderslanglands/bbl-build-rs.git" }
 ```
 
-Still assuming you are wrapping a lib called `foo`, call this somewhere in your
-`build.rs`:
+Call this somewhere in your `build.rs`:
 
 ```rust
-let _dst = Config::new("foo", "bbl-foo")
-  .define("BBL_LANGUAGES", "rust")
-  .build();
+let binding_dest = Config::new("foo", "bbl-foo")
+    .define("BBL_LANGUAGES", "rust")
+    .build();
 
 println!("cargo:rerun-if-changed=bbl-foo");
 ```
 
 If you have a different project layout make sure you adjust the location of the
-`bbl-foo` folder in bot the call to `Config::new()` and the `println!()`
+`bbl-foo` folder in both the call to `Config::new()` and the `println!()`
 invocation.
 
 Bindings will be generated in `$OUT_DIR/build/foo.rs`.
