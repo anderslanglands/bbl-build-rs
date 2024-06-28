@@ -83,3 +83,7 @@ I.e. you'd have:
 ```shell
 export BBL_PLUGIN_PATH=/usr/local/plugins/
 ```
+
+> After you set this you must run `cargo clean` and re-build (as the binding's
+> `build.rs` only looks for changes in the input to trigger re-runs, not in the
+> output)!
