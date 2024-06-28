@@ -55,8 +55,26 @@ include!(concat!(env!("OUT_DIR"), "/build/foo.rs"));
 
 ## Pitfalls
 
+### Rust Bindings Are Not Found
+
+If you get an error like this:
+
+```
+error: couldn't read .../foo/target/debug/build/foo-0aeb4a980c00a1b4/out/build/oiio.rs: No such file or directory (os error 2)
+ --> src/libffi.rs:1:1
+  |
+6 | include!(concat!(env!("OUT_DIR"), "/build/foo.rs"));
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |
+  = note: this error originates in the macro `include` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: could not build `foo`
+```
+
 Make sure `BBL_PLUGIN_PATH` is set to where the Rust plugin for `babble` can be
 found.
+Otherwise the last step of code generation silently fails and the Rust
+bindings file never gets created.
 
 On a Linux system a typical location would be `/usr/local/plugins/libbbl-rust`.
 
