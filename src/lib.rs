@@ -94,42 +94,59 @@ fn read_link_line(dst: &Path, project_name: &str) -> String {
     let contents = &contents[index..];
 
     // link args are contained between | and ||
-    let index = contents.find("| ")
+    let index = contents
+        .find("| ")
         .unwrap_or_else(|| panic!("could not find beginning of linker args in {}", build_ninja));
 
-    let contents = &contents[index+2..];
+    let contents = &contents[index + 2..];
 
-    let end = contents.find("||").unwrap_or_else(||panic!("could not find end of linker args in {}", build_ninja));
+    let end = contents
+        .find("||")
+        .unwrap_or_else(|| panic!("could not find end of linker args in {}", build_ninja));
     // on windows drive letters are encoded as C$:\
     let contents = contents[..end].replace("$:", ":");
 
     contents.to_string()
 }
 
+/// Builder struct to configure a Babble `CMake` build.
 pub struct Config {
     project_name: String,
     project_path: PathBuf,
+    output_path: Option<PathBuf>,
     defines: Vec<(OsString, OsString)>,
     build_type: Option<String>,
 }
 
 impl Config {
-    pub fn new<P: AsRef<Path>>(project_name: &str, path: P) -> Config {
+    pub fn new<P: AsRef<Path>>(project_name: &str, path: P) -> Self {
         Config {
             project_name: project_name.to_string(),
             project_path: path.as_ref().to_owned(),
+            output_path: None,
             defines: Vec::new(),
             build_type: None,
         }
     }
 
-    pub fn define<K: AsRef<OsStr>, V: AsRef<OsStr>>(&mut self, key: K, value: V) -> &mut Config {
+    /// Override the output path.
+    ///
+    /// This is e.g. useful if you want to store the generated bindings in your repository and only
+    /// re-generate them on demand. Storing pre-generated bindings also allows to build such a crate
+    /// w/o having the resp. headers installed, e.g. for a runner on `docs.rs`.
+    pub fn output_path<P: AsRef<Path>>(&mut self, path: P) -> &mut Self {
+        self.output_path = Some(path.as_ref().to_owned());
+        self
+    }
+
+    /// Add a define passed to `CMake`.
+    pub fn define<K: AsRef<OsStr>, V: AsRef<OsStr>>(&mut self, key: K, value: V) -> &mut Self {
         self.defines
             .push((key.as_ref().to_os_string(), value.as_ref().to_os_string()));
         self
     }
 
-    pub fn build_type(&mut self, build_type: &str) -> &mut Config {
+    pub fn build_type(&mut self, build_type: &str) -> &mut Self {
         self.build_type = Some(build_type.to_string());
         self
     }
@@ -145,23 +162,26 @@ impl Config {
     //     self
     // }
 
-    pub fn build(&mut self) -> PathBuf {
-        let out_dir = match std::env::var("OUT_DIR") {
-            Ok(out_dir) => out_dir,
-            // if we don't have OUT_DIR, i.e. we're not running in a build.rs
-            // (but probably from a test environment), make a build dir in
-            // target
-            Err(_) => std::env::current_dir()
-                .unwrap()
-                .join("target")
-                .join(&self.project_name)
-                .to_string_lossy()
-                .to_string(),
+    pub fn build(&mut self) -> Result<PathBuf, std::io::Error> {
+        let dst = if let Some(output_path) = &self.output_path {
+            output_path.clone()
+        } else {
+            PathBuf::from(match std::env::var("OUT_DIR") {
+                Ok(out_dir) => out_dir,
+                // if we don't have OUT_DIR, i.e. we're not running in a build.rs
+                // (but probably from a test environment), make a build dir in
+                // target
+                Err(_) => std::env::current_dir()
+                    .unwrap()
+                    .join("target")
+                    .join(&self.project_name)
+                    .to_string_lossy()
+                    .to_string(),
+            })
         };
 
-        let dst = PathBuf::from(out_dir);
         let build = dst.join("build");
-        let _ = fs::create_dir_all(&build);
+        let _ = fs::create_dir_all(&build)?;
 
         self.maybe_clear(&build);
 
@@ -198,7 +218,7 @@ impl Config {
 
         print_link_args(&dst, &self.project_name);
 
-        dst
+        Ok(dst)
     }
 
     // If a cmake project has previously been built (e.g. CMakeCache.txt already
@@ -217,7 +237,8 @@ impl Config {
         // CMake will apparently store canonicalized paths which normally
         // isn't relevant to us but we canonicalize it here to ensure
         // we're both checking the same thing.
-        let path = fs::canonicalize(&self.project_path).unwrap_or_else(|_| self.project_path.clone());
+        let path =
+            fs::canonicalize(&self.project_path).unwrap_or_else(|_| self.project_path.clone());
         let mut f = match std::fs::File::open(dir.join("CMakeCache.txt")) {
             Ok(f) => f,
             Err(..) => return,
